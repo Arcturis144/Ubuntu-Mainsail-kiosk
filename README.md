@@ -195,6 +195,157 @@ Mainsail will still see ≥ 1536 CSS‑px → widescreen.
 | Fonts too tiny | Move virtual res closer to native and recalc `S` (e.g. 1680 × 1050 @ 0.86). |
 
 ---
+# Embedding a Web Terminal into a Mainsail Kiosk
+
+Integrate a lightweight web‑terminal (ttyd) directly into the Mainsail UI so you can run shell commands from the same dashboard that manages your printer.
+
+---
+
+## Prerequisites
+
+| Requirement              | Notes                                                 |
+| ------------------------ | ----------------------------------------------------- |
+| **Mainsail + Moonraker** | Already running on the host SBC/PC.                   |
+| **Nginx**                | Bundled with MainsailOS/KIAUH installs.               |
+| **sudo access**          | Needed for package installs and editing system files. |
+
+> Replace bracketed tokens (e.g. `[INSTANCE_ROOT]`) with paths, user names or addresses that match **your** setup.
+
+---
+
+## 1  Install `ttyd`
+
+```bash
+sudo apt update
+sudo apt install build-essential cmake git libjson-c-dev libwebsockets-dev
+
+git clone https://github.com/tsl0922/ttyd.git
+cd ttyd && mkdir build && cd build
+cmake ..
+make -j$(nproc)
+sudo make install
+```
+
+`ttyd` is now in `/usr/local/bin`.
+
+---
+
+## 2  Create a systemd service
+
+```bash
+sudo nano /etc/systemd/system/ttyd.service
+```
+
+```ini
+[Unit]
+Description=Web terminal (ttyd for Mainsail)
+After=network.target
+
+[Service]
+User=[PRINTER_USER]                 # account that owns the printer instance
+Group=[PRINTER_USER]
+WorkingDirectory=[INSTANCE_ROOT]    # e.g. /home/pi/printer_DATA
+
+ExecStart=/usr/local/bin/ttyd \
+          --port 7681 \
+          --writable \
+          -c [USERNAME]:[PASSWORD] \
+          --cwd [INSTANCE_ROOT] \
+          bash
+
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Enable and start:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now ttyd.service
+```
+
+---
+
+## 3  Reverse‑proxy `/terminal/` through Nginx
+
+Edit the server block that already hosts Mainsail (usually `/etc/nginx/conf.d/mainsail.conf`).  Add **inside** the `server { … }` braces:
+
+```nginx
+location ^~ /terminal/ {
+    proxy_pass         http://127.0.0.1:7681/;
+    proxy_http_version 1.1;
+    proxy_set_header   Upgrade $http_upgrade;
+    proxy_set_header   Connection "upgrade";
+    proxy_set_header   Host $host;
+}
+```
+
+Reload Nginx:
+
+```bash
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+*Test*
+
+```bash
+curl -I http://<HOST-IP>/terminal/
+```
+
+Expect `HTTP/1.1 401 Unauthorized` (Basic‑Auth challenge).
+
+---
+
+## 4  Add a **Terminal** button to Mainsail’s sidebar
+
+Create the theme folder if it doesn’t exist:
+
+```bash
+mkdir -p [INSTANCE_ROOT]/config/.theme
+nano [INSTANCE_ROOT]/config/.theme/navi.json
+```
+
+```json
+[
+  {
+    "title": "Terminal",
+    "href": "/terminal/",
+    "icon": "mdi-console",
+    "position": 25
+  }
+]
+```
+
+Refresh Mainsail → a **Terminal** entry appears; click it and log in with `[USERNAME] / [PASSWORD]`.
+
+---
+
+## 5  Optional hardening
+
+| Option                 | Snippet / Action                                                                                                                 |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| **HTTPS**              | Add `listen 443 ssl; …` and point to your TLS cert.                                                                              |
+| **LAN‑only**           | Inside the `location /terminal/` block:<br>`allow 192.168.0.0/24;`<br>`deny  all;`                                               |
+| **Move auth to Nginx** | Remove `-c user:pass` from the service and add:<br>`auth_basic "Printer shell";`<br>`auth_basic_user_file /etc/nginx/.htpasswd;` |
+
+---
+
+## 6  Troubleshooting
+
+| Check                   | Command                              | Expected               |
+| ----------------------- | ------------------------------------ | ---------------------- |
+| Service status          | `systemctl status ttyd`              | `active (running)`     |
+| ttyd local reachability | `curl http://127.0.0.1:7681/`        | HTML with "ttyd" title |
+| Proxy path              | `curl -I http://<HOST-IP>/terminal/` | `401 Unauthorized`     |
+
+Once those tests pass, the integrated terminal is ready for daily use. Enjoy entirely browser‑based tinkering with your printer!
+
+
+---
 
 ## Acknowledgements
 * Drafted and refined with the help of ChatGPT.
