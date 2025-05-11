@@ -1,143 +1,205 @@
 # Ubuntu-Mainsail-kiosk
 Just a little how-to to make the mainsail WebUI as a kiosk-desktop
 
-0 · What you start with
-Ubuntu Server 22.04 (fresh or headless)
+# Full‑Screen **Mainsail** Kiosk on Ubuntu Server 22.04
 
-Klipper + Moonraker + Mainsail already installed (e.g. via KIAUH)
+> **Goal**  Turn a plain Ubuntu Server box into a one‑purpose desktop that boots straight into a **full‑screen Mainsail WebUI**.  
+> Even on a 1440 × 900 (16∶10) monitor the dashboard appears in **“widescreen”** layout by rendering at 1920 × 1200 and down‑scaling *live* (DSR‑style).
 
-Your Linux user → <username>
+---
 
-Folder that holds printer.cfg (example uses /home/<username>/printer_Ender3v1_data/config/)
+## Contents
 
-Monitor’s native resolution (example: 1440 × 900, 16 : 10)
+1. [Prerequisites](#1-prerequisites)
+2. [Install a lightweight X stack](#2-install-a-lightweight-x-stack)
+3. [Auto‑login with LightDM](#3-auto-login-with-lightdm)
+4. [Math § ─ pick virtual resolution & scale factor](#4-math-§-─-pick-virtual-resolution--scale-factor)
+5. [Write the `mainsail‑kiosk‑session` script](#5-write-the-mainsail‑kiosk‑session-script)
+6. [Remove Mainsail’s 1024 px cap](#6-remove-mainsails-1024px-cap)
+7. [Enable graphics target & reboot](#7-enable-graphics-target--reboot)
+8. [Adapting to any monitor](#8-adapting-to-any-monitor)
+9. [Troubleshooting](#9-troubleshooting)
 
-1 · Install the lightweight graphics stack
+---
 
-sudo apt update
-sudo apt install --no-install-recommends \
+## 1 · Prerequisites
+
+| Item | Example |
+|------|---------|
+| Ubuntu Server 22.04 | fresh/minimal install |
+| Klipper + Moonraker + Mainsail | installed (e.g. via **KIAUH**) |
+| Linux user account | `<username>` *(replace in commands)* |
+| Native monitor resolution | **1440 × 900** *(16∶10)* |
+
+> You **do not** need a full desktop; Openbox + LightDM is plenty.
+
+---
+
+## 2 · Install a lightweight X stack
+
+```bash
+sudo apt update && sudo apt install --no-install-recommends \
   xserver-xorg xinit openbox lightdm chromium-browser \
   x11-xserver-utils unclutter fonts-ubuntu -y
-Give your user the needed groups:
+```
 
+Add user to the required groups:
+
+```bash
 sudo usermod -aG dialout,tty,video,plugdev <username>
+```
 
-2 · Make LightDM auto‑login and launch a kiosk session
+Log out & back in once so the groups take effect.
 
+---
+
+## 3 · Auto‑login with LightDM
+
+```bash
 sudo tee /etc/lightdm/lightdm.conf.d/50-kiosk.conf >/dev/null <<EOF
 [Seat:*]
 autologin-user=<username>
 autologin-user-timeout=0
 user-session=mainsail-kiosk
 EOF
-Desktop entry:
+```
 
+Add a desktop entry so LightDM can start the custom session:
+
+```bash
 sudo tee /usr/share/xsessions/mainsail-kiosk.desktop >/dev/null <<'EOF'
 [Desktop Entry]
 Type=Application
 Name=Mainsail Kiosk
 Exec=/usr/local/bin/mainsail-kiosk-session
 EOF
-3 · Maths: choose a “virtual desktop” and one scale factor 
-𝑆
-S
-𝑆
-=
-native width
-virtual width
-  
-=
-  
-native height
-virtual height
-S= 
-virtual width
-native width
-​
- = 
-virtual height
-native height
-​
- 
-Keep the same aspect ratio (otherwise fonts distort).
-Make sure virtual width ≥ 1536 px so Mainsail enters widescreen.
+```
 
-Native 1440 × 900	Virtual desktop	Scale factor 
-𝑆
-S	Comments
-(example)	1920 × 1200	0.75	25 % shrink, guaranteed widescreen
-1680 × 1050	0.86	14 % shrink
-1600 × 1000	0.90	10 % shrink (minimum to hit widescreen)
+---
 
-Pick what feels comfortable. We’ll use 1920 × 1200 @ 0.75 in the script below.
+## 4 · Math § ─ pick virtual resolution & scale factor
 
-4 · Write the kiosk session script
-bash
-Copy
-Edit
+We want **CSS width ≥ 1536 px** so Quasar/Mainsail flips to the *widescreen* tier.
+
+Formula (keep same aspect‑ratio):
+
+```text
+S = native_width  /  virtual_width
+  = native_height /  virtual_height
+```
+
+| Native 1440 × 900 | Virtual desktop | Scale factor `S` | Notes |
+|-------------------|-----------------|------------------|-------|
+| (example) | **1920 × 1200** | **0.75** | 25 % smaller UI; always widescreen |
+|  | 1680 × 1050 | 0.86 | 14 % smaller |
+|  | 1600 × 1000 | 0.90 | 10 % smaller (minimum to hit widescreen) |
+
+> **We’ll use 1920 × 1200 @ 0.75** below; swap your own pair if you prefer.
+
+---
+
+## 5 · Write the `mainsail‑kiosk‑session` script
+
+```bash
 sudo nano /usr/local/bin/mainsail-kiosk-session
-bash
-Copy
-Edit
+```
+
+```bash
 #!/usr/bin/env bash
-xset s off -dpms
-unclutter -idle 1 &
+xset s off -dpms                 # no blanking
+unclutter -idle 1 &              # hide mouse cursor
 
 /snap/bin/chromium \
   --kiosk http://mainsail.local/ \
   --user-agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123 Safari/537.36" \
-  --window-size=1920,1200 \          # ← your chosen virtual desktop
-  --force-device-scale-factor=0.75 \ # ← your S value
+  --window-size=1920,1200 \
+  --force-device-scale-factor=0.75 \
   --high-dpi-support=0 \
   --touch-events=disabled \
   --noerrdialogs --disable-translate --disable-infobars \
   --disable-session-crashed-bubble
-bash
-Copy
-Edit
+```
+
+```bash
 sudo chmod +x /usr/local/bin/mainsail-kiosk-session
-What happens?
+```
 
-Chromium renders at 1920 × 1200.
+### 🔍 Why these flags?
 
-scale 0.75 collapses that to exactly 1440 × 900 device pixels.
+| Flag | Purpose |
+|------|---------|
+| `--window-size=1920,1200` | Chromium renders to a 1920 × 1200 viewport. |
+| `--force-device-scale-factor=0.75` | Down‑scales 0.75 × → fits 1440 × 900 hardware. |
+| `--high-dpi-support=0` | Disables auto Hi‑DPI. |
+| `--touch-events=disabled` | Ensures Quasar uses desktop, not tablet, heuristics. |
 
-Mainsail sees ≥ 1536 px ⇒ switches to widescreen tier (no black bars, right drawer docks beside main panel).
+---
 
-5 · (One‑liner) Remove Mainsail’s width cap forever
-bash
-Copy
-Edit
+## 6 · Remove Mainsail’s 1024 px cap
+
+> Do **once** per printer‑config folder (replace the path below).
+
+```bash
 CFG=/home/<username>/printer_Ender3v1_data/config
 sudo -u <username> mkdir -p $CFG/.theme
 echo '#page-container{max-width:none!important;}' | \
   sudo -u <username> tee $CFG/.theme/custom.css
-6 · Enable graphics target & reboot
-bash
-Copy
-Edit
+```
+
+---
+
+## 7 · Enable graphics target & reboot
+
+```bash
 sudo systemctl set-default graphical.target
 sudo systemctl restart lightdm   # or just sudo reboot
-7 · Adapting to any monitor
-Measure native resolution (e.g. 1280 × 720, 1600 × 900, 1920 × 1080).
+```
 
-Pick a virtual desktop ≥ 1536 px wide, same aspect‑ratio.
+### Boot flow
 
-Compute 
-𝑆
-S once:
-S = native_width ÷ virtual_width
+```
+BIOS → LightDM auto‑login → Openbox → mainsail‑kiosk‑session → full‑screen Mainsail (widescreen tier)
+```
 
-Edit both numbers in the --window-size= and the --force-device-scale-factor= line.
+---
 
-Example for a 1280 × 720 panel you want to upscale to 1600 × 900:
+## 8 · Adapting to **any** monitor
 
-ini
-Copy
-Edit
+1. Measure native resolution (e.g. 1280 × 720).  
+2. Pick a virtual desktop with **same aspect‑ratio** and `width ≥ 1536`.  
+3. Compute scale `S = native_width / virtual_width`.  
+4. Edit **both** numbers in the script:
+
+```bash
+--window-size=<virtual_w>,<virtual_h>
+--force-device-scale-factor=<S>
+```
+
+Example for 1280 × 720 → 1600 × 900:
+
+```bash
 --window-size=1600,900
---force-device-scale-factor=0.80
-(1600 × 0.80 = 1280, 900 × 0.80 = 720, CSS width = 1600 ≥ 1536 ⇒ widescreen.)
+--force-device-scale-factor=0.80   # 1280 / 1600
+```
 
-Done!
-Power → login splash → black flash → full‑screen Mainsail in widescreen layout every time, even on panels smaller than 1536 px wide. Share, fork, remix at will.
+Mainsail will still see ≥ 1536 CSS‑px → widescreen.
+
+---
+
+## 9 · Troubleshooting
+
+| Symptom | Fix |
+|---------|-----|
+| LightDM loops back to login | Ensure the script is executable and every back‑slash line‑continuation is present. |
+| Browser opens but dashboard is < 1536 px | Double‑check scale math; make sure Hi‑DPI is off (`--high-dpi-support=0`). |
+| Fonts too tiny | Move virtual res closer to native and recalc `S` (e.g. 1680 × 1050 @ 0.86). |
+
+---
+
+### License
+
+> Public Domain — do whatever you like.
+
+---
+
+Enjoy your **fullscreen Mainsail** kiosk—no black borders, no tablet UI, even on smaller monitors!
