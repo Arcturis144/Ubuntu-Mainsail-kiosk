@@ -196,6 +196,10 @@ Mainsail will still see ≥ 1536 CSS‑px → widescreen.
 
 ---
 
+## Acknowledgements
+* Drafted and refined with the help of ChatGPT.
+
+---
 
 ### License
 
