@@ -197,9 +197,11 @@ Mainsail will still see ≥ 1536 CSS‑px → widescreen.
 ---
 
 
-## License
-This work is licensed under a Creative Commons Attribution 4.0 International License.  
-© 2025 Your Name (<Arcturis144>)
+### License
+
+This guide is released under the **[Creative Commons Attribution 4.0 International License](https://creativecommons.org/licenses/by/4.0/)**.
+
+© 2025 [Arcturis144](https://github.com/Arcturis144) — you’re free to copy, remix, and share, provided you give appropriate credit and link to the license.
 
 ---
 
